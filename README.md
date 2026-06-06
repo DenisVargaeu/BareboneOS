@@ -1,36 +1,24 @@
-# miniOS Simulation
+# miniOS
 
-Jednoduchá simulácia operačného systému v termináli napísaná v jazyku C.
+Jednoduchý operačný systém založený na jadre v jazyku C.
 
-## Funkcie
-- Kernel loop (nekonečná slučka shellu)
-- ASCII boot screen s logmi
-- Command parser
-- Príkazy: `help`, `clear`, `echo`, `time`, `ls`, `exit`
-- Farebný "hacker" prompt: `root@miniOS:#`
+## Sťahovanie
+Najnovšie binárne súbory nájdete v záložke **Releases** na GitHub stránke tohto projektu:
+- `minios.iso`: Bootovateľný ISO obraz.
+- `minios.img`: Surový obraz disku.
 
-## Ako to spustiť
+## Minimálne systémové požiadavky
+Pre spustenie miniOS potrebujete:
+1.  **Emulátor:** QEMU, VirtualBox alebo VMware.
+2.  **Fyzický hardvér:** Počítač s architektúrou x86 a podporou bootovania z CD/USB (pre ISO) alebo diskety (pre IMG).
 
-### Požiadavky
-- GCC compiler
-- Make (voliteľné)
+### Ako spustiť pomocou QEMU
+```bash
+qemu-system-i386 -cdrom minios.iso
+```
 
-### Kompilácia a spustenie pomocou Make
+## Pre vývojárov
+Ak chcete projekt sami kompilovať, potrebujete GCC, Binutils (as, ld) a GRUB.
 ```bash
 make
-./minios
 ```
-
-### Kompilácia bez Make
-```bash
-gcc src/main.c -o minios
-./minios
-```
-
-## Príkazy v simulácii
-- `help`: Zobrazí zoznam príkazov.
-- `clear`: Vyčistí obrazovku.
-- `echo <text>`: Vypíše zadaný text.
-- `time`: Zobrazí aktuálny čas systému.
-- `ls`: Simuluje výpis súborov v koreňovom adresári.
-- `exit`: Ukončí simuláciu a "vypne" systém.

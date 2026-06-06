@@ -3,3 +3,4 @@
 *.iso
 isodir/
 .DS_Store
+deploy/
