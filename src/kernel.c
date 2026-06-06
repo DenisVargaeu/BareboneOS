@@ -8,6 +8,7 @@
 // VGA Colors
 #define COLOR_WHITE_ON_BLACK 0x0F
 #define COLOR_GREEN_ON_BLACK 0x0A
+#define COLOR_CYAN_ON_BLACK  0x0B
 
 static size_t term_row = 0;
 static size_t term_col = 0;
@@ -30,6 +31,13 @@ void update_cursor(int x, int y) {
     outb(0x3D5, (uint8_t) (pos & 0xFF));
     outb(0x3D4, 0x0E);
     outb(0x3D5, (uint8_t) ((pos >> 8) & 0xFF));
+}
+
+/* --- Utilities --- */
+void delay(int count) {
+    for (int i = 0; i < count * 100000; i++) {
+        asm volatile ("nop");
+    }
 }
 
 /* --- Terminal functions --- */
@@ -77,6 +85,26 @@ void term_clear() {
     update_cursor(0, 0);
 }
 
+void boot_splash() {
+    term_clear();
+    term_print("  __  __ _       _  ____   ____  \n", COLOR_CYAN_ON_BLACK);
+    term_print(" |  \\/  (_)_ __ (_)/ __ \\ / ___| \n", COLOR_CYAN_ON_BLACK);
+    term_print(" | |\\/| | | '_ \\| | |  | |\\___ \\ \n", COLOR_CYAN_ON_BLACK);
+    term_print(" | |  | | | | | | | |__| | ___) |\n", COLOR_CYAN_ON_BLACK);
+    term_print(" |_|  |_|_|_| |_|_|\\____/ |____/ \n\n", COLOR_CYAN_ON_BLACK);
+    
+    term_print("Starting miniOS Kernel...\n", COLOR_WHITE_ON_BLACK);
+    
+    term_print("Loading: [", COLOR_WHITE_ON_BLACK);
+    for (int i = 0; i < 30; i++) {
+        delay(550); // 30 * 5 = 150
+        term_putc('#', COLOR_WHITE_ON_BLACK);
+    }
+    term_print("]\n", COLOR_WHITE_ON_BLACK);
+    delay(200);
+    term_clear();
+}
+
 /* --- Keyboard Driver (Polling) --- */
 char scancode_to_ascii(uint8_t scancode) {
     static const char kbd_map[] = {
@@ -115,12 +143,16 @@ int strncmp(const char* s1, const char* s2, size_t n) {
 /* --- Shell Commands --- */
 void exec_command(char* cmd) {
     if (strcmp(cmd, "help") == 0) {
-        term_print("Available commands: help, clear, echo [text], reboot\n", COLOR_WHITE_ON_BLACK);
+        term_print("Available commands: help, clear, echo [text], reboot, date, ver\n", COLOR_WHITE_ON_BLACK);
     } else if (strcmp(cmd, "clear") == 0) {
         term_clear();
     } else if (strncmp(cmd, "echo ", 5) == 0) {
         term_print(cmd + 5, COLOR_WHITE_ON_BLACK);
         term_putc('\n', COLOR_WHITE_ON_BLACK);
+    } else if (strcmp(cmd, "date") == 0) {
+        term_print("Saturday, June 6, 2026\n", COLOR_WHITE_ON_BLACK);
+    } else if (strcmp(cmd, "ver") == 0) {
+        term_print("miniOS Kernel v0.1\n", COLOR_WHITE_ON_BLACK);
     } else if (strcmp(cmd, "reboot") == 0) {
         term_print("Rebooting...\n", COLOR_WHITE_ON_BLACK);
         // Standard PS/2 controller reboot hack
@@ -135,7 +167,7 @@ void exec_command(char* cmd) {
 }
 
 void kernel_main(void) {
-    term_clear();
+    boot_splash();
     term_print("miniOS Kernel v0.1 Interactive Shell\n", COLOR_WHITE_ON_BLACK);
     term_print("root@miniOS:# ", COLOR_GREEN_ON_BLACK);
 
