@@ -12,7 +12,7 @@
 
 static size_t term_row = 0;
 static size_t term_col = 0;
-static uint16_t* term_buf = (uint16_t*) VGA_ADDR;
+static volatile uint16_t* term_buf = (volatile uint16_t*) VGA_ADDR;
 
 /* --- Port I/O functions --- */
 static inline uint8_t inb(uint16_t port) {
@@ -41,7 +41,23 @@ void delay(int count) {
 }
 
 /* --- Terminal functions --- */
+void term_scroll() {
+    for (size_t y = 1; y < VGA_HEIGHT; y++) {
+        for (size_t x = 0; x < VGA_WIDTH; x++) {
+            term_buf[(y-1) * VGA_WIDTH + x] = term_buf[y * VGA_WIDTH + x];
+        }
+    }
+    for (size_t x = 0; x < VGA_WIDTH; x++) {
+        term_buf[(VGA_HEIGHT-1) * VGA_WIDTH + x] = (uint16_t) ' ' | (uint16_t) COLOR_WHITE_ON_BLACK << 8;
+    }
+}
+
 void term_putc(char c, uint8_t color) {
+    if (term_row >= VGA_HEIGHT) {
+        term_scroll();
+        term_row = VGA_HEIGHT - 1;
+    }
+
     if (c == '\n') {
         term_col = 0;
         term_row++;
@@ -57,14 +73,7 @@ void term_putc(char c, uint8_t color) {
     }
 
     if (term_row >= VGA_HEIGHT) {
-        for (size_t y = 1; y < VGA_HEIGHT; y++) {
-            for (size_t x = 0; x < VGA_WIDTH; x++) {
-                term_buf[(y-1) * VGA_WIDTH + x] = term_buf[y * VGA_WIDTH + x];
-            }
-        }
-        for (size_t x = 0; x < VGA_WIDTH; x++) {
-            term_buf[(VGA_HEIGHT-1) * VGA_WIDTH + x] = (uint16_t) ' ' | (uint16_t) COLOR_WHITE_ON_BLACK << 8;
-        }
+        term_scroll();
         term_row = VGA_HEIGHT - 1;
     }
     update_cursor(term_col, term_row);
