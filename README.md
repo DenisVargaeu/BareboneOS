@@ -1,6 +1,9 @@
 # miniOS
 
-Jednoduchý operačný systém založený na jadre v jazyku C.
+Jednoduchý operačný systém založený na jadre v jazyku C. Verzia 0.2.
+
+## Novinky v 0.2
+- Vylepšená bootovacia obrazovka s animovaným centrovaným loading barom.
 
 ## Sťahovanie
 Najnovšie binárne súbory nájdete v záložke **Releases** na GitHub stránke tohto projektu:

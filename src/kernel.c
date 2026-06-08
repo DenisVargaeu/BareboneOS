@@ -96,21 +96,40 @@ void term_clear() {
 
 void boot_splash() {
     term_clear();
+
+    // ASCII Logo in CYAN
     term_print("  __  __ _       _  ____   ____  \n", COLOR_CYAN_ON_BLACK);
     term_print(" |  \\/  (_)_ __ (_)/ __ \\ / ___| \n", COLOR_CYAN_ON_BLACK);
     term_print(" | |\\/| | | '_ \\| | |  | |\\___ \\ \n", COLOR_CYAN_ON_BLACK);
     term_print(" | |  | | | | | | | |__| | ___) |\n", COLOR_CYAN_ON_BLACK);
-    term_print(" |_|  |_|_|_| |_|_|\\____/ |____/ \n\n", COLOR_CYAN_ON_BLACK);
-    
-    term_print("Starting miniOS Kernel...\n", COLOR_WHITE_ON_BLACK);
-    
-    term_print("Loading: [", COLOR_WHITE_ON_BLACK);
-    for (int i = 0; i < 30; i++) {
-        delay(550); // 30 * 5 = 150
-        term_putc('#', COLOR_WHITE_ON_BLACK);
+    term_print(" |_|  |_|_|_| |_|_|\\____/ |____/ \n", COLOR_CYAN_ON_BLACK);
+    term_print("             miniOS v0.2         \n\n", COLOR_CYAN_ON_BLACK);
+
+    // Centered Loading Bar Configuration
+    int bar_width = 40;
+    int start_col = (VGA_WIDTH - bar_width) / 2;
+    int row = 18;
+
+    // Draw label
+    term_row = row - 1;
+    term_col = (VGA_WIDTH - 14) / 2;
+    term_print("Loading System", COLOR_WHITE_ON_BLACK);
+
+    // Draw frame
+    term_row = row;
+    term_col = start_col;
+    term_putc('[', COLOR_WHITE_ON_BLACK);
+    term_col = start_col + bar_width - 1;
+    term_putc(']', COLOR_WHITE_ON_BLACK);
+
+    // Fill with animation
+    for (int i = 0; i < bar_width - 2; i++) {
+        term_row = row;
+        term_col = start_col + 1 + i;
+        term_putc('#', COLOR_CYAN_ON_BLACK);
+        delay(50);
     }
-    term_print("]\n", COLOR_WHITE_ON_BLACK);
-    delay(200);
+    delay(500); // Pause before clearing
     term_clear();
 }
 
@@ -150,21 +169,42 @@ int strncmp(const char* s1, const char* s2, size_t n) {
 }
 
 /* --- Shell Commands --- */
+
+void cmd_help() {
+    term_print("Available commands:\n", COLOR_WHITE_ON_BLACK);
+    term_print("  help      - Show this help message\n", COLOR_WHITE_ON_BLACK);
+    term_print("  clear     - Clear the terminal\n", COLOR_WHITE_ON_BLACK);
+    term_print("  echo      - Echo text\n", COLOR_WHITE_ON_BLACK);
+    term_print("  minifetch - Show system info\n", COLOR_WHITE_ON_BLACK);
+    term_print("  date      - Show date\n", COLOR_WHITE_ON_BLACK);
+    term_print("  ver       - Show kernel version\n", COLOR_WHITE_ON_BLACK);
+    term_print("  reboot    - Reboot the system\n", COLOR_WHITE_ON_BLACK);
+}
+
+void cmd_minifetch() {
+    term_print("      .---.\n", COLOR_CYAN_ON_BLACK);
+    term_print("     /  _  \\     miniOS v0.2\n", COLOR_CYAN_ON_BLACK);
+    term_print("    |  (_)  |    CPU: x86\n", COLOR_CYAN_ON_BLACK);
+    term_print("     \\  _  /     Shell: MiniShell\n", COLOR_CYAN_ON_BLACK);
+    term_print("      '---'      Uptime: 0m\n\n", COLOR_CYAN_ON_BLACK);
+}
+
 void exec_command(char* cmd) {
     if (strcmp(cmd, "help") == 0) {
-        term_print("Available commands: help, clear, echo [text], reboot, date, ver\n", COLOR_WHITE_ON_BLACK);
+        cmd_help();
     } else if (strcmp(cmd, "clear") == 0) {
         term_clear();
     } else if (strncmp(cmd, "echo ", 5) == 0) {
         term_print(cmd + 5, COLOR_WHITE_ON_BLACK);
         term_putc('\n', COLOR_WHITE_ON_BLACK);
+    } else if (strcmp(cmd, "minifetch") == 0) {
+        cmd_minifetch();
     } else if (strcmp(cmd, "date") == 0) {
         term_print("Saturday, June 6, 2026\n", COLOR_WHITE_ON_BLACK);
     } else if (strcmp(cmd, "ver") == 0) {
-        term_print("miniOS Kernel v0.1\n", COLOR_WHITE_ON_BLACK);
+        term_print("miniOS Kernel v0.2\n  - Added centered animated loading bar.\n", COLOR_WHITE_ON_BLACK);
     } else if (strcmp(cmd, "reboot") == 0) {
         term_print("Rebooting...\n", COLOR_WHITE_ON_BLACK);
-        // Standard PS/2 controller reboot hack
         uint8_t good = 0x02;
         while (good & 0x02) good = inb(0x64);
         asm volatile ("outb %0, %1" : : "a"((uint8_t)0xFE), "Nd"((uint16_t)0x64));
@@ -177,7 +217,7 @@ void exec_command(char* cmd) {
 
 void kernel_main(void) {
     boot_splash();
-    term_print("miniOS Kernel v0.1 Interactive Shell\n", COLOR_WHITE_ON_BLACK);
+    term_print("miniOS Kernel v0.2 Interactive Shell\n", COLOR_WHITE_ON_BLACK);
     term_print("root@miniOS:# ", COLOR_GREEN_ON_BLACK);
 
     while (1) {
