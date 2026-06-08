@@ -14,6 +14,8 @@
 #define COLOR_RED   "\033[0;31m"
 #define COLOR_RESET "\033[0m"
 
+static time_t boot_time;
+
 void boot_screen() {
     printf(COLOR_CYAN);
     printf("  __  __ _       _  ____   ____  \n");
@@ -42,7 +44,12 @@ void cmd_help() {
     printf("  clear     - Clear the terminal screen\n");
     printf("  echo [txt]- Print text to the console\n");
     printf("  time      - Show current system time\n");
+    printf("  uptime    - Show system uptime\n");
     printf("  ls        - List virtual files\n");
+    printf("  whoami    - Show current user\n");
+    printf("  cpu       - Show CPU info\n");
+    printf("  ver       - Show kernel version\n");
+    printf("  minifetch - Show system info\n");
     printf("  exit      - Shut down miniOS\n");
 }
 
@@ -53,11 +60,43 @@ void cmd_time() {
     printf("Current time: %s\n", t_str);
 }
 
+void cmd_uptime() {
+    time_t now = time(NULL);
+    double seconds = difftime(now, boot_time);
+    printf("System Uptime: %.0f seconds\n", seconds);
+}
+
+void cmd_cpu() {
+    FILE *cpuinfo = fopen("/proc/cpuinfo", "r");
+    if (cpuinfo) {
+        char line[256];
+        int count = 0;
+        while (fgets(line, sizeof(line), cpuinfo) && count < 10) {
+            if (strstr(line, "model name") || strstr(line, "vendor_id") || strstr(line, "cpu MHz")) {
+                printf("%s", line);
+                count++;
+            }
+        }
+        fclose(cpuinfo);
+    } else {
+        printf("CPU: Simulated x86 Host Processor\n");
+    }
+}
+
+void cmd_minifetch() {
+    printf(COLOR_CYAN "      .---.\n");
+    printf("     /  _  \\     miniOS v0.2.3 (Simulated)\n");
+    printf("    |  (_)  |    CPU: x86_64 (Host)\n");
+    printf("     \\  _  /     Shell: MiniShell\n");
+    printf("      '---'      Uptime: Simulated\n\n" COLOR_RESET);
+}
+
 void cmd_ls() {
     printf("bin/  dev/  etc/  home/  root/  tmp/\n");
 }
 
 int main() {
+    boot_time = time(NULL);
     char input[MAX_CMD_LEN];
     char *args[MAX_ARGS];
     
@@ -93,8 +132,18 @@ int main() {
             printf("\033[H\033[J");
         } else if (strcmp(cmd, "time") == 0) {
             cmd_time();
+        } else if (strcmp(cmd, "uptime") == 0) {
+            cmd_uptime();
         } else if (strcmp(cmd, "ls") == 0) {
             cmd_ls();
+        } else if (strcmp(cmd, "whoami") == 0) {
+            printf("root\n");
+        } else if (strcmp(cmd, "cpu") == 0) {
+            cmd_cpu();
+        } else if (strcmp(cmd, "ver") == 0) {
+            printf("miniOS Kernel v0.2.3 (Simulated)\n");
+        } else if (strcmp(cmd, "minifetch") == 0) {
+            cmd_minifetch();
         } else if (strcmp(cmd, "echo") == 0) {
             for (int j = 1; j < i; j++) {
                 printf("%s ", args[j]);
