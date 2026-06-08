@@ -15,6 +15,11 @@ static size_t term_row = 0;
 static size_t term_col = 0;
 static volatile uint16_t* term_buf = (volatile uint16_t*) VGA_ADDR;
 
+/* --- Globals --- */
+static volatile uint32_t timer_ticks = 0;
+#define MAX_CMD_LEN 128
+static char cmd_buffer[MAX_CMD_LEN];
+
 /* --- Port I/O functions --- */
 static inline uint8_t inb(uint16_t port) {
     uint8_t ret;
@@ -43,6 +48,45 @@ void delay(int count) {
     for (int i = 0; i < count * 100000; i++) {
         asm volatile ("nop");
     }
+}
+
+void itoa(uint32_t n, char* s, int base) {
+    int i = 0;
+    if (n == 0) {
+        s[i++] = '0';
+        s[i] = '\0';
+        return;
+    }
+    while (n > 0) {
+        int rem = n % base;
+        s[i++] = (rem > 9) ? (rem - 10) + 'a' : rem + '0';
+        n = n / base;
+    }
+    s[i] = '\0';
+    // Reverse
+    for (int j = 0; j < i / 2; j++) {
+        char temp = s[j];
+        s[j] = s[i - j - 1];
+        s[i - j - 1] = temp;
+    }
+}
+
+int strcmp(const char* s1, const char* s2) {
+    while (*s1 && (*s1 == *s2)) {
+        s1++;
+        s2++;
+    }
+    return *(unsigned char*)s1 - *(unsigned char*)s2;
+}
+
+int strncmp(const char* s1, const char* s2, size_t n) {
+    while (n && *s1 && (*s1 == *s2)) {
+        s1++;
+        s2++;
+        n--;
+    }
+    if (n == 0) return 0;
+    return *(unsigned char*)s1 - *(unsigned char*)s2;
 }
 
 /* --- Terminal functions --- */
@@ -108,7 +152,7 @@ void boot_splash() {
     term_print(" | |\\/| | | '_ \\| | |  | |\\___ \\ \n", COLOR_CYAN_ON_BLACK);
     term_print(" | |  | | | | | | | |__| | ___) |\n", COLOR_CYAN_ON_BLACK);
     term_print(" |_|  |_|_|_| |_|_|\\____/ |____/ \n", COLOR_CYAN_ON_BLACK);
-    term_print("             miniOS v0.2         \n\n", COLOR_CYAN_ON_BLACK);
+    term_print("             miniOS v0.3.0         \n\n", COLOR_CYAN_ON_BLACK);
 
     // Centered Loading Bar Configuration
     int bar_width = 40;
@@ -132,13 +176,14 @@ void boot_splash() {
         term_row = row;
         term_col = start_col + 1 + i;
         term_putc('#', COLOR_CYAN_ON_BLACK);
-        delay(50);
+        delay(500);
     }
-    delay(500); // Pause before clearing
+    
+    delay(5000); // Pause before clearing
     term_clear();
 }
 
-/* --- Keyboard Driver (Polling) --- */
+/* --- Keyboard Driver --- */
 char scancode_to_ascii(uint8_t scancode) {
     static const char kbd_map[] = {
         0, 27, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', '\b',
@@ -155,77 +200,221 @@ char scancode_to_ascii(uint8_t scancode) {
     return 0;
 }
 
-#define MAX_CMD_LEN 128
-static char cmd_buffer[MAX_CMD_LEN];
-static int cmd_index = 0;
+/* --- Input Functions --- */
 
-/* --- String Utilities --- */
-void itoa(uint32_t n, char* s, int base) {
-    int i = 0;
-    if (n == 0) {
-        s[i++] = '0';
-        s[i] = '\0';
-        return;
+uint8_t get_scancode() {
+    while (!(inb(0x64) & 1)) {
+        timer_ticks++;
     }
-    while (n > 0) {
-        int rem = n % base;
-        s[i++] = (rem > 9) ? (rem - 10) + 'a' : rem + '0';
-        n = n / base;
-    }
-    s[i] = '\0';
-    // Reverse
-    for (int j = 0; j < i / 2; j++) {
-        char temp = s[j];
-        s[j] = s[i - j - 1];
-        s[i - j - 1] = temp;
+    return inb(0x60);
+}
+
+void term_readline(char* buffer, int max_len, int mask) {
+    int index = 0;
+    while (1) {
+        uint8_t scancode = get_scancode();
+        if (!(scancode & 0x80)) {
+            char c = scancode_to_ascii(scancode);
+            if (c == '\n') {
+                term_putc('\n', COLOR_WHITE_ON_BLACK);
+                buffer[index] = '\0';
+                break;
+            } else if (c == '\b') {
+                if (index > 0) {
+                    index--;
+                    if (term_col > 0) {
+                        term_col--;
+                        const size_t idx = term_row * VGA_WIDTH + term_col;
+                        term_buf[idx] = (uint16_t) ' ' | (uint16_t) COLOR_WHITE_ON_BLACK << 8;
+                        update_cursor(term_col, term_row);
+                    }
+                }
+            } else if (c && index < max_len - 1) {
+                buffer[index++] = c;
+                if (mask) {
+                    term_putc('*', COLOR_WHITE_ON_BLACK);
+                } else {
+                    term_putc(c, COLOR_WHITE_ON_BLACK);
+                }
+            }
+        }
     }
 }
 
-int strcmp(const char* s1, const char* s2) {
-    while (*s1 && (*s1 == *s2)) {
-        s1++;
-        s2++;
-    }
-    return *(unsigned char*)s1 - *(unsigned char*)s2;
-}
+int login_screen() {
+    char username[32];
+    char password[32];
+    int attempts = 0;
 
-int strncmp(const char* s1, const char* s2, size_t n) {
-    while (n && *s1 && (*s1 == *s2)) {
-        s1++;
-        s2++;
-        n--;
+    while (attempts < 3) {
+        term_clear();
+        term_print("========================================\n", COLOR_CYAN_ON_BLACK);
+        term_print("            miniOS SECURE LOGIN         \n", COLOR_CYAN_ON_BLACK);
+        term_print("========================================\n\n", COLOR_CYAN_ON_BLACK);
+
+        term_print("Username: ", COLOR_WHITE_ON_BLACK);
+        term_readline(username, 32, 0);
+
+        term_print("Password: ", COLOR_WHITE_ON_BLACK);
+        term_readline(password, 32, 1);
+
+        if (strcmp(username, "admin") == 0 && strcmp(password, "mini123") == 0) {
+            term_print("\nLogin successful! Welcome, ", COLOR_GREEN_ON_BLACK);
+            term_print(username, COLOR_GREEN_ON_BLACK);
+            term_print("\n", COLOR_GREEN_ON_BLACK);
+            delay(10000);
+            return 1;
+        } else {
+            term_print("\nInvalid username or password.\n", COLOR_RED_ON_BLACK);
+            attempts++;
+            delay(15000);
+        }
     }
-    if (n == 0) return 0;
-    return *(unsigned char*)s1 - *(unsigned char*)s2;
+
+    term_print("\nToo many failed attempts. System locked.\n", COLOR_RED_ON_BLACK);
+    while(1) asm volatile("hlt");
+    return 0;
 }
 
 /* --- Shell Commands --- */
+
+uint8_t current_text_color = COLOR_WHITE_ON_BLACK;
 
 void cmd_help() {
     term_print("Available commands:\n", COLOR_WHITE_ON_BLACK);
     term_print("  help      - Show this help message\n", COLOR_WHITE_ON_BLACK);
     term_print("  clear     - Clear the terminal\n", COLOR_WHITE_ON_BLACK);
-    term_print("  ls        - List files\n", COLOR_WHITE_ON_BLACK);
-    term_print("  echo      - Echo text\n", COLOR_WHITE_ON_BLACK);
+    term_print("  ls        - List virtual directories\n", COLOR_WHITE_ON_BLACK);
+    term_print("  echo      - Echo text to screen\n", COLOR_WHITE_ON_BLACK);
+    term_print("  calc      - Simple calculator (e.g., calc 5 + 3)\n", COLOR_WHITE_ON_BLACK);
+    term_print("  color     - Change text color (0-15)\n", COLOR_WHITE_ON_BLACK);
     term_print("  minifetch - Show system info\n", COLOR_WHITE_ON_BLACK);
-    term_print("  date      - Show date\n", COLOR_WHITE_ON_BLACK);
+    term_print("  date      - Show CMOS date and time\n", COLOR_WHITE_ON_BLACK);
     term_print("  uptime    - Show system uptime\n", COLOR_WHITE_ON_BLACK);
+    term_print("  cat <file>- Read a virtual file\n", COLOR_WHITE_ON_BLACK);
+    term_print("  neofetch  - Fancy system information\n", COLOR_WHITE_ON_BLACK);
     term_print("  ver       - Show kernel version\n", COLOR_WHITE_ON_BLACK);
     term_print("  whoami    - Show current user\n", COLOR_WHITE_ON_BLACK);
-    term_print("  cpu       - Show CPU info\n", COLOR_WHITE_ON_BLACK);
+    term_print("  cpu       - Show CPU info via CPUID\n", COLOR_WHITE_ON_BLACK);
+    term_print("  ps        - List running processes\n", COLOR_WHITE_ON_BLACK);
     term_print("  reboot    - Reboot the system\n", COLOR_WHITE_ON_BLACK);
     term_print("  shutdown  - Halt the system\n", COLOR_WHITE_ON_BLACK);
 }
 
-void cmd_minifetch() {
-    term_print("      .---.\n", COLOR_CYAN_ON_BLACK);
-    term_print("     /  _  \\     miniOS v0.2.1\n", COLOR_CYAN_ON_BLACK);
-    term_print("    |  (_)  |    CPU: x86\n", COLOR_CYAN_ON_BLACK);
-    term_print("     \\  _  /     Shell: MiniShell\n", COLOR_CYAN_ON_BLACK);
-    term_print("      '---'      Uptime: 1m (estimated)\n\n", COLOR_CYAN_ON_BLACK);
+void cmd_calc(char* args) {
+    if (!args || *args == '\0') {
+        term_print("Usage: calc <num1> <op> <num2>\n", COLOR_WHITE_ON_BLACK);
+        return;
+    }
+    int n1 = 0, n2 = 0;
+    char op = 0;
+    char* p = args;
+    while (*p == ' ') p++;
+    while (*p >= '0' && *p <= '9') {
+        n1 = n1 * 10 + (*p - '0');
+        p++;
+    }
+    while (*p == ' ') p++;
+    op = *p;
+    p++;
+    while (*p == ' ') p++;
+    while (*p >= '0' && *p <= '9') {
+        n2 = n2 * 10 + (*p - '0');
+        p++;
+    }
+    int res = 0;
+    if (op == '+') res = n1 + n2;
+    else if (op == '-') res = n1 - n2;
+    else if (op == '*') res = n1 * n2;
+    else if (op == '/') {
+        if (n2 == 0) {
+            term_print("Error: Division by zero\n", COLOR_RED_ON_BLACK);
+            return;
+        }
+        res = n1 / n2;
+    } else {
+        term_print("Unsupported operator. Use +, -, *, /\n", COLOR_WHITE_ON_BLACK);
+        return;
+    }
+    char buf[16];
+    term_print("Result: ", COLOR_WHITE_ON_BLACK);
+    itoa(res, buf, 10);
+    term_print(buf, COLOR_CYAN_ON_BLACK);
+    term_putc('\n', COLOR_WHITE_ON_BLACK);
 }
 
-static volatile uint32_t timer_ticks = 0;
+void cmd_color(char* args) {
+    if (!args || *args == '\0') {
+        term_print("Usage: color <0-15>\n", COLOR_WHITE_ON_BLACK);
+        return;
+    }
+    int c = 0;
+    char* p = args;
+    while (*p == ' ') p++;
+    while (*p >= '0' && *p <= '9') {
+        c = c * 10 + (*p - '0');
+        p++;
+    }
+    if (c >= 0 && c <= 15) {
+        current_text_color = (uint8_t)c;
+        term_print("Color changed.\n", current_text_color);
+    } else {
+        term_print("Invalid color code. Use 0-15.\n", COLOR_RED_ON_BLACK);
+    }
+}
+
+void cmd_ls(char* args) {
+    if (!args || *args == '\0') {
+        term_print("bin/  dev/  etc/  home/  root/  tmp/\n", current_text_color);
+        return;
+    }
+    char* p = args;
+    while (*p == ' ') p++;
+    if (strcmp(p, "etc") == 0 || strcmp(p, "etc/") == 0) {
+        term_print("version  motd\n", current_text_color);
+    } else if (strcmp(p, "root") == 0 || strcmp(p, "root/") == 0) {
+        term_print("secret.txt\n", current_text_color);
+    } else {
+        term_print("ls: ", COLOR_RED_ON_BLACK);
+        term_print(p, COLOR_RED_ON_BLACK);
+        term_print(": No such directory\n", COLOR_RED_ON_BLACK);
+    }
+}
+
+void cmd_cat(char* args) {
+    if (!args || *args == '\0') {
+        term_print("Usage: cat <file>\n", COLOR_WHITE_ON_BLACK);
+        return;
+    }
+    char* p = args;
+    while (*p == ' ') p++;
+    if (strcmp(p, "etc/version") == 0) {
+        term_print("miniOS v0.3.0-stable\n", current_text_color);
+    } else if (strcmp(p, "etc/motd") == 0) {
+        term_print("Welcome to miniOS! The really working OS.\n", current_text_color);
+    } else if (strcmp(p, "root/secret.txt") == 0) {
+        term_print("The cake is a lie!\n", current_text_color);
+    } else {
+        term_print("cat: ", COLOR_RED_ON_BLACK);
+        term_print(p, COLOR_RED_ON_BLACK);
+        term_print(": No such file or directory\n", COLOR_RED_ON_BLACK);
+    }
+}
+
+void cmd_ps() {
+    term_print("PID  TTY      TIME     CMD\n", current_text_color);
+    term_print("1    tty1     00:00:01 init\n", current_text_color);
+    term_print("2    tty1     00:00:00 kthreadd\n", current_text_color);
+    term_print("14   tty1     00:00:00 minishell\n", current_text_color);
+}
+
+void cmd_minifetch() {
+    term_print("      .---.\n", COLOR_CYAN_ON_BLACK);
+    term_print("     /  _  \\     miniOS v0.3.0\n", COLOR_CYAN_ON_BLACK);
+    term_print("    |  (_)  |    CPU: x86\n", COLOR_CYAN_ON_BLACK);
+    term_print("     \\  _  /     Shell: MiniShell Plus\n", COLOR_CYAN_ON_BLACK);
+    term_print("      '---'      State: Really Working\n\n", COLOR_CYAN_ON_BLACK);
+}
 
 /* --- Real Hardware Commands --- */
 
@@ -248,7 +437,6 @@ void cmd_date() {
     uint8_t month  = get_rtc_register(0x08);
     uint8_t year   = get_rtc_register(0x09);
 
-    // BCD Conversion
     second = (second & 0x0F) + ((second / 16) * 10);
     minute = (minute & 0x0F) + ((minute / 16) * 10);
     hour   = ((hour & 0x0F) + (((hour & 0x70) / 16) * 10)) | (hour & 0x80);
@@ -257,19 +445,19 @@ void cmd_date() {
     year   = (year & 0x0F) + ((year / 16) * 10);
 
     char buf[16];
-    term_print("Date: 20", COLOR_WHITE_ON_BLACK);
+    term_print("Date: 20", current_text_color);
     itoa(year, buf, 10); term_print(buf, COLOR_CYAN_ON_BLACK);
-    term_putc('-', COLOR_WHITE_ON_BLACK);
+    term_putc('-', current_text_color);
     itoa(month, buf, 10); term_print(buf, COLOR_CYAN_ON_BLACK);
-    term_putc('-', COLOR_WHITE_ON_BLACK);
+    term_putc('-', current_text_color);
     itoa(day, buf, 10); term_print(buf, COLOR_CYAN_ON_BLACK);
-    term_print(" Time: ", COLOR_WHITE_ON_BLACK);
+    term_print(" Time: ", current_text_color);
     itoa(hour, buf, 10); term_print(buf, COLOR_CYAN_ON_BLACK);
-    term_putc(':', COLOR_WHITE_ON_BLACK);
+    term_putc(':', current_text_color);
     itoa(minute, buf, 10); term_print(buf, COLOR_CYAN_ON_BLACK);
-    term_putc(':', COLOR_WHITE_ON_BLACK);
+    term_putc(':', current_text_color);
     itoa(second, buf, 10); term_print(buf, COLOR_CYAN_ON_BLACK);
-    term_putc('\n', COLOR_WHITE_ON_BLACK);
+    term_putc('\n', current_text_color);
 }
 
 void get_cpu_brand(char* brand) {
@@ -283,29 +471,26 @@ void get_cpu_brand(char* brand) {
 void cmd_cpu() {
     char brand[49];
     get_cpu_brand(brand);
-    term_print("CPU: ", COLOR_WHITE_ON_BLACK);
+    term_print("CPU: ", current_text_color);
     term_print(brand, COLOR_CYAN_ON_BLACK);
-    term_putc('\n', COLOR_WHITE_ON_BLACK);
-    
+    term_putc('\n', current_text_color);
     uint32_t edx;
     asm volatile("cpuid" : "=d"(edx) : "a"(1));
-    term_print("FPU Support: ", COLOR_WHITE_ON_BLACK);
+    term_print("FPU Support: ", current_text_color);
     if (edx & 1) term_print("Yes\n", COLOR_GREEN_ON_BLACK);
     else term_print("No\n", COLOR_RED_ON_BLACK);
 }
 
 void cmd_uptime() {
-    // Approx scaling for the polling loop (adjust based on hardware/emulation speed)
     uint32_t total_seconds = timer_ticks / 20000000; 
     uint32_t minutes = total_seconds / 60;
     uint32_t seconds = total_seconds % 60;
-    
     char buf[16];
-    term_print("Uptime: ", COLOR_WHITE_ON_BLACK);
+    term_print("Uptime: ", current_text_color);
     itoa(minutes, buf, 10); term_print(buf, COLOR_CYAN_ON_BLACK);
-    term_print("m ", COLOR_WHITE_ON_BLACK);
+    term_print("m ", current_text_color);
     itoa(seconds, buf, 10); term_print(buf, COLOR_CYAN_ON_BLACK);
-    term_print("s\n", COLOR_WHITE_ON_BLACK);
+    term_print("s\n", current_text_color);
 }
 
 void exec_command(char* cmd) {
@@ -313,78 +498,58 @@ void exec_command(char* cmd) {
         cmd_help();
     } else if (strcmp(cmd, "clear") == 0) {
         term_clear();
-    } else if (strcmp(cmd, "ls") == 0) {
-        term_print("bin/  dev/  etc/  home/  root/  tmp/\n", COLOR_WHITE_ON_BLACK);
+    } else if (strncmp(cmd, "ls", 2) == 0) {
+        cmd_ls(cmd + 2);
     } else if (strncmp(cmd, "echo ", 5) == 0) {
-        term_print(cmd + 5, COLOR_WHITE_ON_BLACK);
-        term_putc('\n', COLOR_WHITE_ON_BLACK);
-    } else if (strcmp(cmd, "minifetch") == 0) {
+        term_print(cmd + 5, current_text_color);
+        term_putc('\n', current_text_color);
+    } else if (strncmp(cmd, "cat ", 4) == 0) {
+        cmd_cat(cmd + 4);
+    } else if (strncmp(cmd, "calc ", 5) == 0) {
+        cmd_calc(cmd + 5);
+    } else if (strncmp(cmd, "color ", 6) == 0) {
+        cmd_color(cmd + 6);
+    } else if (strcmp(cmd, "minifetch") == 0 || strcmp(cmd, "neofetch") == 0) {
         cmd_minifetch();
     } else if (strcmp(cmd, "date") == 0) {
         cmd_date();
     } else if (strcmp(cmd, "uptime") == 0) {
         cmd_uptime();
     } else if (strcmp(cmd, "ver") == 0) {
-        term_print("miniOS Kernel v0.2.4\n  - True hardware date (CMOS) and CPU info.\n", COLOR_WHITE_ON_BLACK);
+        term_print("miniOS Kernel v0.3.0\n  - Login system added.\n  - Enhanced shell commands.\n", current_text_color);
     } else if (strcmp(cmd, "whoami") == 0) {
-        term_print("root\n", COLOR_WHITE_ON_BLACK);
+        term_print("admin\n", current_text_color);
+    } else if (strcmp(cmd, "ps") == 0) {
+        cmd_ps();
     } else if (strcmp(cmd, "cpu") == 0) {
         cmd_cpu();
     } else if (strcmp(cmd, "reboot") == 0) {
-        term_print("Rebooting...\n", COLOR_WHITE_ON_BLACK);
+        term_print("Rebooting...\n", current_text_color);
         uint8_t good = 0x02;
         while (good & 0x02) good = inb(0x64);
         outb(0x64, 0xFE);
     } else if (strcmp(cmd, "shutdown") == 0) {
-        term_print("System halted.\n", COLOR_WHITE_ON_BLACK);
-        // Try QEMU shutdown
-        outw(0x604, 0x2000);  // Newer QEMU
-        outw(0xB004, 0x2000); // Older QEMU
+        term_print("System halted.\n", current_text_color);
+        outw(0x604, 0x2000); 
+        outw(0xB004, 0x2000);
         asm volatile ("cli; hlt");
     } else if (cmd[0] != '\0') {
-        term_print("Unknown command: ", COLOR_WHITE_ON_BLACK);
-        term_print(cmd, COLOR_WHITE_ON_BLACK);
-        term_putc('\n', COLOR_WHITE_ON_BLACK);
+        term_print("Unknown command: ", current_text_color);
+        term_print(cmd, current_text_color);
+        term_putc('\n', current_text_color);
     }
 }
 
 void kernel_main(void) {
     boot_splash();
-    term_print("miniOS Kernel v0.2.4 Interactive Shell\n", COLOR_WHITE_ON_BLACK);
-    term_print("root@miniOS:# ", COLOR_GREEN_ON_BLACK);
-
-    while (1) {
-        timer_ticks++;
-        if (inb(0x64) & 1) {
-            uint8_t scancode = inb(0x60);
-            if (!(scancode & 0x80)) {
-                char c = scancode_to_ascii(scancode);
-                if (c) {
-                    if (c == '\n') {
-                        term_putc('\n', COLOR_WHITE_ON_BLACK);
-                        cmd_buffer[cmd_index] = '\0';
-                        exec_command(cmd_buffer);
-                        cmd_index = 0;
-                        term_print("root@miniOS:# ", COLOR_GREEN_ON_BLACK);
-                    } else if (c == '\b') {
-                        if (cmd_index > 0) {
-                            cmd_index--;
-                            // Visual backspace
-                            if (term_col > 14) { // Don't delete prompt
-                                term_col--;
-                                const size_t index = term_row * VGA_WIDTH + term_col;
-                                term_buf[index] = (uint16_t) ' ' | (uint16_t) COLOR_WHITE_ON_BLACK << 8;
-                                update_cursor(term_col, term_row);
-                            }
-                        }
-                    } else {
-                        if (cmd_index < MAX_CMD_LEN - 1) {
-                            cmd_buffer[cmd_index++] = c;
-                            term_putc(c, COLOR_WHITE_ON_BLACK);
-                        }
-                    }
-                }
-            }
+    if (login_screen()) {
+        term_clear();
+        term_print("miniOS Kernel v0.3.0 Interactive Shell\n", COLOR_WHITE_ON_BLACK);
+        term_print("admin@miniOS:# ", COLOR_GREEN_ON_BLACK);
+        while (1) {
+            term_readline(cmd_buffer, MAX_CMD_LEN, 0);
+            exec_command(cmd_buffer);
+            term_print("admin@miniOS:# ", COLOR_GREEN_ON_BLACK);
         }
     }
 }

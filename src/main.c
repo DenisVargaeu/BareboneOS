@@ -92,7 +92,47 @@ void cmd_minifetch() {
 }
 
 void cmd_ls() {
-    printf("bin/  dev/  etc/  home/  root/  tmp/\n");
+    printf("bin/  dev/  etc/  home/  root/  tmp/  README.md\n");
+}
+
+int login() {
+    char username[32];
+    char password[32];
+    int attempts = 0;
+
+    while (attempts < 3) {
+        printf("\033[H\033[J");
+        printf(COLOR_CYAN "========================================\n");
+        printf("            miniOS SECURE LOGIN         \n");
+        printf("========================================\n\n" COLOR_RESET);
+
+        printf("Username: ");
+        if (fgets(username, 32, stdin) == NULL) return 0;
+        username[strcspn(username, "\n")] = 0;
+
+        printf("Password: ");
+        // Simple password masking for simulation (not perfect but works)
+        system("stty -echo");
+        if (fgets(password, 32, stdin) == NULL) {
+            system("stty echo");
+            return 0;
+        }
+        system("stty echo");
+        printf("\n");
+        password[strcspn(password, "\n")] = 0;
+
+        if (strcmp(username, "admin") == 0 && strcmp(password, "mini123") == 0) {
+            printf(COLOR_GREEN "\nLogin successful! Welcome, %s\n" COLOR_RESET, username);
+            sleep(1);
+            return 1;
+        } else {
+            printf(COLOR_RED "\nInvalid username or password.\n" COLOR_RESET);
+            attempts++;
+            sleep(1);
+        }
+    }
+    printf(COLOR_RED "\nToo many failed attempts. System locked.\n" COLOR_RESET);
+    exit(1);
 }
 
 int main() {
@@ -102,8 +142,10 @@ int main() {
     
     boot_screen();
 
+    if (!login()) return 0;
+
     while (1) {
-        printf(COLOR_GREEN "root@miniOS" COLOR_RESET ":" COLOR_CYAN "# " COLOR_RESET);
+        printf(COLOR_GREEN "admin@miniOS" COLOR_RESET ":" COLOR_CYAN "# " COLOR_RESET);
         if (fgets(input, MAX_CMD_LEN, stdin) == NULL) {
             break;
         }
